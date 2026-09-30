@@ -88,7 +88,7 @@ WSL에서는 리눅스용 결과물이 나오고 화면을 그리는 엔진도 �
 | 포인핸드 상세 | 503 | `https://pawinhand.kr/animal/detail/{공고번호}` | 포인핸드 링크와 같은 곳 |
 | `pasm.kr` | 7 | `pasm.kr` | 주소가 아니다 |
 
-옛 주소의 `desertion_no`로 `https://www.animal.go.kr/front/awtis/public/publicDtl.do?desertionNo={번호}`를 열면 그 아이 공고가 나온다(무작위 4건 확인). 그래서 코어는 옛 주소에서 번호를 꺼내 새 주소를 만들고, 번호가 없는 나머지 510건에는 원문 링크를 두지 않는다. [[PAW-UC-001#UC-S4]] 1단계는 「받아온 `detail_url` 그대로」라고 되어 있어 고쳐야 한다(9.2).
+옛 주소의 `desertion_no`로 `https://www.animal.go.kr/front/awtis/public/publicDtl.do?desertionNo={번호}`를 열면 그 아이 공고가 나온다(무작위 4건 확인). 그래서 코어는 옛 주소에서 번호를 꺼내 새 주소를 만들고, 번호가 없는 나머지 510건에는 원문 링크를 두지 않는다. [[PAW-UC-001#UC-S4]] 1단계가 이 규칙을 따른다.
 
 #### C10 사진 주소를 https로 맞추고 두 곳만 허용한다
 
@@ -159,6 +159,8 @@ flowchart LR
 | 코어 언어 | Rust stable, MSVC 툴체인(`x86_64-pc-windows-msvc`) | — | Tauri의 Windows 빌드 조건 |
 | HTTP | reqwest | 0.13 | 쿼리 폼 인코딩(C8), 요청별 시간 제한(C7) |
 | JSON | serde · serde_json | — | 응답 검사와 변환 |
+| 날짜 | chrono | — | 8자리 날짜 읽기, 기간 계산(없는 날은 그 달 말일) |
+| 주소 인코딩 | percent-encoding | — | 공고번호를 괄호까지 인코딩해 링크를 만든다(C9) |
 | 링크 열기 | tauri-plugin-opener | 2.7 | 코어에서 기본 브라우저를 연다(5장) |
 | 진행 상태 전달 | Tauri 채널(`tauri::ipc::Channel`) | — | 받는 중 건수를 화면에 흘려보낸다([[PAW-PRD-001#R10]]) |
 | 화면 | React + TypeScript | 19.3 · 7.0 | 카드 목록·상세·필터 상태 |
@@ -228,25 +230,27 @@ DB·설정 파일·로그 파일이 없다(C1·C11).
 
 ### 8.1 개발 PC 준비 (Windows, 한 번)
 
-| 도구 | 설치 | 이 PC 상태 |
+| 도구 | 설치 | 이 PC 상태(2026-09-30) |
 |---|---|---|
 | Node.js | — | 24.15 있음 |
 | WebView2 | — | 154 있음 |
-| Rust (rustup, stable MSVC) | `winget install Rustlang.Rustup` | 없음 |
-| Visual Studio 2022 Build Tools + 「C++를 사용한 데스크톱 개발」(MSVC·Windows SDK) | `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` | 없음. 약 3~6GB |
+| Rust (rustup, stable MSVC) | `winget install Rustlang.Rustup` | 설치함(rustup 1.29.1, stable) |
+| Visual Studio 2022 Build Tools + 「C++를 사용한 데스크톱 개발」(MSVC·Windows SDK) | `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"` | 설치함. 관리자 권한(UAC) 확인이 한 번 뜬다. 약 3~6GB |
 
 Build Tools는 2026판(`Microsoft.VisualStudio.BuildTools` 18.x)도 있지만, Rust·Tauri 조합으로 오래 검증된 2022판을 쓴다.
 
 ### 8.2 개발 명령
 
-| 할 일 | 무엇을 | 비고 |
-|---|---|---|
-| 개발 실행 | Tauri 개발 모드 | 화면(Vite 개발 서버)을 띄우고 코어를 빌드해 창을 연다 |
-| 설치 파일 만들기 | Tauri 빌드 | NSIS `setup.exe`가 나온다 |
-| 코어 테스트 | `cargo test` | 네트워크 없이 도는 테스트만 |
-| 실데이터 점검 | `cargo test -- --ignored` | 7장 |
+Tauri CLI는 `frontend/`의 `package.json`에 들어 있고, Tauri 설정은 `backend/`에 있다. CLI는 `TAURI_APP_PATH` 환경 변수가 있으면 그 폴더에서 설정을 찾는다(Tauri CLI 소스 `crates/tauri-cli/src/helpers/app_paths.rs`로 확인 — 변수가 없으면 현재 폴더에서 3단계 아래까지만 찾는다). 이 변수를 매번 치지 않게 명령을 스크립트로 묶는다.
 
-정확한 명령 줄은 폴더 배치에 따라 정해진다(9.2).
+| 할 일 | 명령(저장소 루트에서) | 하는 일 |
+|---|---|---|
+| 개발 실행 | `pwsh scripts/dev.ps1` | `TAURI_APP_PATH=backend`로 두고 `frontend/`에서 `npm run tauri dev` — Vite 개발 서버를 띄우고 코어를 빌드해 창을 연다 |
+| 설치 파일 만들기 | `pwsh scripts/build.ps1` | 같은 방식으로 `npm run tauri build`. 결과는 `backend/target/release/bundle/nsis/` |
+| 코어 테스트 | `backend/`에서 `cargo test` | 네트워크 없이 도는 테스트만 |
+| 실데이터 점검 | `backend/`에서 `cargo test -- --ignored` | 7장 |
+
+`tauri.conf.json`은 화면을 `../frontend/dist`에서 읽고, 개발 때는 `http://localhost:5173`을 본다. 빌드 전후 명령(`npm run dev`·`npm run build`)은 Tauri가 화면 폴더(`frontend/`)에서 돌린다.
 
 ### 8.3 설치 파일 설정
 
@@ -276,7 +280,8 @@ Build Tools는 2026판(`Microsoft.VisualStudio.BuildTools` 18.x)도 있지만, R
 
 ### 9.2 후속 수정·구현 때 확인 (사용자 결정 불필요)
 
-- [ ] [[PAW-UC-001#UC-S4]] 1단계를 C9에 맞게 고친다 — 원문 주소는 받은 `detail_url`에서 번호를 꺼내 새로 만들고, 번호가 없으면 원문 링크를 두지 않는다
-- [ ] Tauri 설정은 `backend/`, 화면은 `frontend/`에 두는 배치에서 Tauri CLI를 어느 폴더에서 실행할지 — 구현 첫 단계에서 확인해 8.2 명령을 확정한다
+- [x] [[PAW-UC-001#UC-S4]] 1단계를 C9에 맞게 고친다 — UC v3에서 반영했다
+- [x] Tauri CLI를 어느 폴더에서 실행할지 — `frontend/`에서 실행하고 `TAURI_APP_PATH`로 `backend/`를 알려 준다. 8.2에 명령으로 확정했다
 - [ ] 한글 보이는 이름으로 NSIS 빌드·시작 메뉴가 문제없는지, 설치 파일 이름을 영문으로 맞추는 법 — 첫 빌드로 확인한다. 한글 이름이 빌드를 깨면 보이는 이름을 영문으로 두고 한글은 창 제목에만 쓴다
 - [ ] 이전 버전 위에 새 `setup.exe`를 실행했을 때 덮어 설치되는지, 앱 제거 때 WebView2 데이터를 지우는 선택지가 있는지 — 첫 빌드로 확인한다
+- [ ] GitHub Actions의 `tauri-action`이 `projectPath: frontend`와 `TAURI_APP_PATH`로 `backend/`를 찾는지 — 첫 빌드로 확인한다. 못 찾으면 `scripts/build.ps1`로 빌드하고 `gh release`로 올리는 방식으로 바꾸고 3장·8.4를 고친다
