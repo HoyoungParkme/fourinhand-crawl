@@ -26,13 +26,14 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 | 무엇 | 약속 |
 |---|---|
-| 부르는 곳 | 화면은 `frontend/src/api/` 한 곳에서만 `invoke`를 부른다(규약 1.9). 화면에 열린 커맨드는 이 셋뿐이다([[PAW-INFRA-001]] 5장) |
+| 부르는 곳 | 화면은 `frontend/src/api/` 한 곳에서만 `invoke`를 부른다(규약 1.9). 화면에 열린 커맨드는 이 셋뿐이다([[PAW-INFRA-001]] 5장). 그 밖에 앱 정보가 설치된 앱의 버전을 읽는 권한(`core:app:allow-version`) 하나만 더 연다 |
 | 누구의 권한 | 로그인이 없다. 코어는 설치한 사람의 PC에서 그 사람 권한으로 돈다 |
 | 이름 | 커맨드는 snake_case. 인자와 결과의 필드는 camelCase — Tauri가 Rust의 snake_case 인자를 camelCase로 바꿔 받는 기본 규칙을 따른다 |
 | 날짜·시각 | 날짜는 `YYYY-MM-DD`, 시각은 ISO 8601에 시간대까지(`2026-09-30T14:02:11+09:00`). 포인핸드의 8자리 날짜는 코어가 바꾼다 |
 | 「오늘」 | 기간 거르기와 공고 상태의 「오늘」은 PC의 현지 날짜다. 조회할 때마다 새로 읽는다([[PAW-DOM-001#NoticePeriod]]) |
 | 빈 값 | 빈 문자열과 공백뿐인 값은 `null`로 보낸다. 글자 앞뒤 공백은 지운다. 몸무게 원래 값(`weight.raw`)만은 받은 글자 그대로 둔다([[PAW-DOM-001#Weight]]) |
-| 상태 | 코어는 받아온 목록 하나([[PAW-DOM-001#Snapshot]])와 받는 중 여부만 들고 있다. `load_animals`가 도는 동안 `query_animals`·`open_link`는 이전 목록으로 답한다 |
+| 상태 | 코어는 받아온 목록 하나([[PAW-DOM-001#Snapshot]])와 받기 상태만 들고 있다. `load_animals`가 도는 동안 `query_animals`·`open_link`는 이전 목록으로 답하고, 또 부른 `load_animals`는 새로 받지 않고 그 받기의 결과를 함께 받는다 |
+| 스레드 | 세 커맨드 모두 창(메인 스레드) 밖에서 돈다 — 받기·큰 조회·브라우저 띄우기 동안 창이 멈추지 않게 |
 | 네트워크 | 포인핸드에 요청하는 커맨드는 `load_animals` 하나다. 나머지는 코어 메모리만 본다 |
 
 **오류 형식.** 커맨드가 실패하면 promise가 아래 모양으로 거절된다. 화면은 `code`로 보여줄 문구를 고른다([[PAW-UI-001#UI-1]] 규칙). `message`는 개발용 설명이라 화면에 그대로 보이지 않는다.
@@ -43,11 +44,10 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 | code | 커맨드 | 뜻 | 화면 |
 |---|---|---|---|
-| `busy` | load_animals | 이미 받는 중이다 | 알리지 않는다 — 버튼이 이미 막혀 있다. 그래도 생기면 1초 뒤 다시 부른다 |
 | `connection-failed` | load_animals | 포인핸드에 닿지 못했다 | UI-1의 7·8 |
 | `timeout` | load_animals | 한 요청이 15초를 넘었다 | UI-1의 7·8 |
-| `bad-format` | load_animals | 오류 응답이거나 JSON 배열이 아니다 | UI-1의 7·8 |
-| `too-many-pages` | load_animals | 20쪽(2만 건)을 넘었다 | UI-1의 7·8 |
+| `bad-format` | load_animals | 오류 응답이거나 JSON 배열이 아니거나, 한 마리도 옮기지 못했다 | UI-1의 7·8 |
+| `too-many-pages` | load_animals | 20쪽(2만 건 가까이)을 넘었다 | UI-1의 7·8 |
 | `no-snapshot` | query_animals, open_link | 아직 다 받은 목록이 없다 | 순서를 지키면 생기지 않는다 |
 | `invalid-condition` | query_animals | 조건 값이 틀렸다 | 화면이 먼저 막는다(UI-1의 11) |
 | `not-found` | open_link | 지금 목록에 없는 공고번호다 | 순서를 지키면 생기지 않는다 |
@@ -64,13 +64,13 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 ```json
 {
   "name": "load_animals",
-  "description": "포인핸드에서 보호중 고양이를 전부 받아 코어의 목록을 바꾼다. 쪽을 받을 때마다 누적 마릿수를 onProgress로 보낸다. 실패하면 이전 목록을 그대로 둔다.",
+  "description": "포인핸드에서 보호중 고양이를 전부 받아 코어의 목록을 바꾼다. 쪽을 받을 때마다 누적 마릿수를 onProgress로 보낸다. 실패하면 이전 목록을 그대로 둔다. 이미 받는 중이면 새로 받지 않고 그 받기가 끝나기를 기다려 같은 결과를 돌려준다.",
   "inputSchema": {
     "type": "object",
     "required": ["onProgress"],
     "properties": {
       "onProgress": {
-        "description": "Tauri 채널. 쪽을 받을 때마다 { \"received\": 누적 마릿수 }를 보낸다",
+        "description": "Tauri 채널. 쪽을 받을 때마다 { \"received\": 누적 마릿수 }를 보낸다. 받는 중에 들어와 기다리는 부르기에는 보내지 않는다",
         "x-tauri": "Channel<FetchProgress>"
       }
     }
@@ -81,8 +81,10 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 **진행 상태** — 쪽마다 한 번
 
 ```json
-{ "received": 2000 }
+{ "received": 1950 }
 ```
+
+`received`는 지금까지 받은 줄 수다. 쪽을 겹쳐 받으므로(아래) 1000 · 1950 · 2900 …으로 오른다.
 
 **결과**
 
@@ -90,21 +92,22 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 { "fetchedAt": "2026-09-30T14:02:11+09:00", "total": 4225 }
 ```
 
-`total`은 공고번호 중복을 뺀 마릿수다.
+`total`은 공고번호 중복(겹쳐 받은 건 포함)을 뺀 마릿수다.
 
 | 에러 | 언제 |
 |---|---|
-| `busy` | 이미 받는 중일 때. 새로 시작하지 않는다 |
 | `connection-failed` | 인터넷이 끊겼거나 포인핸드 주소에 닿지 못할 때 |
 | `timeout` | 한 요청이 15초를 넘을 때 |
-| `bad-format` | 오류 응답이거나, 응답이 JSON 배열이 아닐 때 |
+| `bad-format` | 오류 응답이거나, 응답이 JSON 배열이 아닐 때. 건은 왔는데 한 건도 옮기지 못했거나, 다 받았는데 한 마리도 없을 때 |
 | `too-many-pages` | 20쪽을 넘게 받을 때 |
+
+받는 중에 또 부르면 그 받기의 결과를 함께 받는다 — 성공이면 같은 결과, 실패면 같은 오류다.
 
 **코어가 하는 일** ([[PAW-UC-001#UC-S1]])
 - 요청: `GET https://pawinhand.net/bridge/animals/condition` — `city=모든 지역`, `country=전체`, `species=고양이`, `breeds=전체`, `state=보호중`, `sex=전체`, `neutral=전체`, `start_date=20200101`, `end_date=오늘`, `offset`, `limit=1000`. 폼 인코딩으로 공백은 `+`([[PAW-INFRA-001#C8]]). User-Agent는 `PawinhandBigCat/{버전} (+https://github.com/HoyoungParkme/fourinhand-crawl)`([[PAW-INFRA-001#C7]])
-- 한 번에 한 요청. 앞 요청이 끝나고 0.3초 뒤 다음 쪽. 포인핸드가 준 건수가 1000보다 적으면 끝
+- 한 번에 한 요청. 앞 요청이 끝나고 0.3초 뒤 다음 쪽. 다음 쪽은 앞 쪽과 50건 겹친다(`offset` 0 · 950 · 1900 …) — 받는 사이 앞쪽에서 빠진 아이가 있어도 뒤 아이를 놓치지 않게. 포인핸드가 준 건수가 1000보다 적으면 끝
 - 한 건씩 옮긴다: 몸무게 해석([[PAW-DOM-001#Weight]]), 사진 주소 정리([[PAW-DOM-001#Photo]]), `detail_url`에서 원문 번호 꺼내기([[PAW-DOM-001#Link]]), 빈 값 `null`. 공고번호가 없거나 날짜(등록일·공고 기간)를 못 읽는 건은 버린다
-- 다 받으면 공고번호 중복을 빼고 목록을 통째로 바꾼 뒤 결과를 돌려준다. 중간에 실패하면 받은 일부를 버린다([[PAW-UC-001#UC-H1]] 2b)
+- 다 받으면 공고번호 중복을 빼고 목록을 통째로 바꾼 뒤 결과를 돌려준다. 중간에 실패하거나 한 마리도 없으면 받은 것을 버리고 이전 목록을 그대로 둔다([[PAW-UC-001#UC-H1]] 2b · [[PAW-UC-001#UC-S1]] 6a)
 
 **연관**: [[PAW-UC-001#UC-H1]] · [[PAW-UC-001#UC-H5]] · [[PAW-DOM-001#Fetch]] · [[PAW-DOM-001#Snapshot]] · [[PAW-UI-001#UI-1]]
 
@@ -186,13 +189,13 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 | `count` | 조건 전부에 걸린 수. 화면의 「N마리」 |
 | `allCount` | 지역 조건만 뺀 나머지 조건에 걸린 수. 지역 목록의 「전국」 숫자 |
 | `regionCounts` | 목록에 있는 시·도마다 하나, 지역 조건만 뺀 나머지 조건으로 센 수. 0마리인 시·도도 온다. 시·도가 빈 아이가 목록에 있으면 `unknown` 하나. 순서는 정하지 않는다 — 화면이 [[PAW-UI-001#UI-1]] 규칙대로 늘어놓는다 |
-| `regionReset` | 고른 시·도가 목록에 아예 없어 지역을 전국으로 바꿔 걸렀으면 `true`([[PAW-UC-001#UC-H5]] 4a) |
+| `regionReset` | 고른 시·도나 지역 미상이 목록에 아예 없어 지역을 전국으로 바꿔 걸렀으면 `true`([[PAW-UC-001#UC-H5]] 4a) |
 | `animals` | 걸린 동물, 정렬된 순서 |
 
 | 에러 | 언제 |
 |---|---|
 | `no-snapshot` | 아직 다 받은 목록이 없을 때 |
-| `invalid-condition` | `minWeightKg`가 숫자가 아니거나 0보다 작을 때, 값이 목록 밖일 때, `kind`가 `sido`인데 `name`이 없을 때 |
+| `invalid-condition` | `minWeightKg`가 숫자가 아니거나(글자로 온 수 포함) 0보다 작을 때, 칸이 빠졌거나 값이 목록 밖일 때, `kind`가 `sido`인데 `name`이 없을 때 |
 
 **코어가 하는 일** ([[PAW-UC-001#UC-S3]] · [[PAW-DOM-001#SearchResult]])
 - 거르는 순서: 몸무게 없음 빼고 `kg >= minWeightKg` → 기간 → 지역
@@ -239,6 +242,7 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 - `pawinhand`: `https://pawinhand.kr/shelter/animal/detail/` 뒤에 공고번호 전체를 주소용으로 인코딩해 붙인다(괄호까지)
 - `source`: `https://www.animal.go.kr/front/awtis/public/publicDtl.do?desertionNo=` 뒤에 원문 번호를 붙인다
 - 허용된 곳인지 확인한 뒤 연다. 화면에는 링크 열기 권한이 없다 — 여는 것은 코어뿐이다([[PAW-INFRA-001]] 5장)
+- 기본 브라우저가 정해지지 않은 PC에서는 Windows가 직접 「앱 선택」 창을 띄우고 `open-failed`가 오지 않을 수 있다([[PAW-UC-001#UC-S4]] 3a2)
 
 **연관**: [[PAW-UC-001#UC-H4]] · [[PAW-UI-001#UI-1]] · [[PAW-UI-001#UI-2]]
 
@@ -271,11 +275,14 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 | 받는 동안 | — | `onProgress`마다 UI-1의 6에 `received`를 적는다 | — |
 | 조건을 바꿀 때 | `query_animals` | 목록·마릿수·지역 숫자를 새로 그린다 | `invalid-condition`이면 마지막으로 올바르던 결과를 그대로 둔다 |
 | 새로고침·다시 시도 | `load_animals` | 지금 조건으로 `query_animals`. `regionReset`이면 지역 칸을 전국으로 바꾸고 안내 띠를 보여준다 | UI-1의 8. `query_animals`는 부르지 않는다 — 보던 목록 그대로 |
+| 켜 둔 채 날짜가 바뀌었을 때 | `query_animals` | 지금 조건으로 다시 그린다 — 공고 상태와 기간이 새 날짜로 맞춰진다 | 아무것도 바꾸지 않는다 |
 | 링크를 누를 때 | `open_link` | 할 일 없음. 브라우저가 열린다 | `open-failed`면 UI-2의 6(`url`로 주소 칸을 채운다), `not-allowed`면 「열 수 없는 주소예요」 |
 
-- 숫자 칸(UI-1의 2.1)은 입력이 멈추고 150ms 뒤, 올바른 값일 때만 `query_animals`를 부른다. 눈금자(2.2)는 끄는 동안 값이 바뀔 때마다 불러도 된다 — 코어 메모리만 보는 호출이라 가볍다
-- `load_animals`가 도는 동안에도 `query_animals`와 `open_link`는 부를 수 있다. 이전 목록으로 답한다
-- `busy`·`no-snapshot`·`not-found`·`no-source`는 이 차례를 지키면 생기지 않는다. 생기면 화면은 아무것도 바꾸지 않는다 — `busy`는 1초 뒤 `load_animals`를 다시 불러 받는 중 화면에 멈추지 않게 하고(개발 중 화면만 다시 그려졌을 때), 나머지는 개발 중 콘솔에만 남긴다
+- 숫자 칸(UI-1의 2.1)은 입력이 멈추고 150ms 뒤, 올바른 값일 때만 `query_animals`를 부른다. 눈금자(2.2)는 끄는 동안 부르지 않고 놓을 때 한 번 부른다 — 기준을 낮추면 걸린 동물이 수천 마리라 한 번의 결과도 크다
+- 지금과 같은 조건이면(이미 고른 칸을 다시 누름) 부르지 않는다
+- `load_animals`가 성공한 뒤 뒤따르는 `query_animals`가 실패해도 받기 실패로 알리지 않는다
+- `load_animals`가 도는 동안에도 `query_animals`와 `open_link`는 부를 수 있다. 이전 목록으로 답한다. 화면을 다시 불러와 `load_animals`를 또 부르면 그 받기의 결과를 함께 받는다
+- `no-snapshot`·`not-found`·`no-source`는 이 차례를 지키면 생기지 않는다. 생기면 화면은 아무것도 바꾸지 않고 개발 중 콘솔에만 남긴다
 
 ## 4. 미결사항
 
