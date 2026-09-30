@@ -455,7 +455,7 @@ classDiagram
 - 응답은 먼저 `Vec<RawAnimal>`(포인핸드 칸 이름 그대로의 serde 구조체)로 읽는다. 배열이 아니면 `BadFormat`. `RawAnimal → Animal` 옮기기가 이 파일의 핵심이다: 날짜 8자리 → `NaiveDate`(못 읽으면 그 건을 버린다), `Weight::parse`, `Photo::from_raw`, `desertion_no` 꺼내기, 빈 값 `None`
 - 테스트: 쿼리 인코딩, 실제 응답 한 건을 담은 JSON으로 옮기기 검증, 그리고 `#[ignore]` 실데이터 점검(실제 API로 한 번 받기, 원문 주소 하나를 열어 공고번호 확인, 사진 하나 열기 — [[PAW-INFRA-001]] 7장)
 
-#### LinkOpener 링크 열개
+#### LinkOpener 링크 열기
 
 `domains/animal/ports.rs`의 트레이트. 앱에서는 `TauriOpener`가, 테스트에서는 연 주소를 적어 두거나 일부러 실패하는 가짜가 구현한다.
 
