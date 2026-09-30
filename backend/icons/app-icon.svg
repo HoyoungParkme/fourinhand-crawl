@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- 앱 아이콘 원본: 저울 초록 바탕에 몸무게 노랑 고양이 윤곽과 눈금자. 포인핸드 로고가 아니다(INFRA C12) -->
+  <rect x="32" y="32" width="960" height="960" rx="216" fill="#2D5B4C"/>
+  <g transform="translate(96 36) scale(13)">
+    <path fill="#F2B51F" d="M14 10l10 12h16l10-12v22c0 12-8 22-18 22S14 44 14 32z"/>
+    <ellipse cx="25.5" cy="33" rx="2.4" ry="3.2" fill="#2D5B4C"/>
+    <ellipse cx="38.5" cy="33" rx="2.4" ry="3.2" fill="#2D5B4C"/>
+  </g>
+  <rect x="212" y="806" width="600" height="30" rx="15" fill="#EEF0EB"/>
+  <rect x="212" y="760" width="30" height="76" rx="15" fill="#EEF0EB"/>
+  <rect x="497" y="776" width="30" height="60" rx="15" fill="#EEF0EB"/>
+  <rect x="782" y="760" width="30" height="76" rx="15" fill="#EEF0EB"/>
+</svg>

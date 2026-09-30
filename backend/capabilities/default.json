@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "화면에 여는 권한: 앱 커맨드 셋과 버전 읽기뿐. 파일·셸·HTTP·링크 열기 권한은 주지 않는다(INFRA 5장)",
+  "windows": ["main"],
+  "permissions": [
+    "allow-load-animals",
+    "allow-query-animals",
+    "allow-open-link",
+    "core:app:allow-version"
+  ]
+}
