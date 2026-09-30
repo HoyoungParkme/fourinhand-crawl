@@ -55,8 +55,8 @@ sequenceDiagram
         SVC->>PS: fetch_page(offset, 1000)
         PS->>PAW: GET 고양이 · 보호중 · 2020-01-01~오늘 · offset · limit=1000
         PAW-->>PS: JSON 배열
-        PS-->>SVC: Animal 목록 (칸 옮기기 · 몸무게 해석)
-        SVC->>SVC: fetch.record_page(n)
+        PS-->>SVC: Page (원래 건수 · 옮긴 Animal — 칸 옮기기 · 몸무게 해석)
+        SVC->>SVC: fetch.record_page(원래 건수)
         SVC-->>CMD: on_page(received)
         CMD--)API: 채널 received
         API--)APP: UI-1의 6에 받은 마릿수
@@ -79,6 +79,7 @@ sequenceDiagram
 
 **읽을 때 볼 것**
 - `replace`는 마지막 쪽까지 받은 뒤 **한 번만** 불린다. 받는 동안 보관소의 목록은 바뀌지 않는다([[PAW-DOM-002#AnimalStore]])
+- 더 받을지는 포인핸드가 준 **원래 건수**로 정한다 — 옮기다 버린 건 때문에 1000보다 적어져 다음 쪽을 놓치지 않게([[PAW-DOM-002#Fetch]])
 - `LoadGuard`는 `load`가 끝날 때 떨어져 「받는 중」이 풀린다. 성공이든 실패든 같다
 - 진행 상태는 서비스가 아니라 커맨드가 채널로 보낸다 — 서비스는 Tauri를 모른다(클래스 명세 3장)
 - 화면은 `load_animals`가 끝난 뒤에야 `query_animals`를 부른다([[PAW-API-001]] 3장). 오늘 날짜는 커맨드가 부를 때마다 읽는다
@@ -146,13 +147,14 @@ sequenceDiagram
         ST-->>SVC: 없음
         SVC-->>CMD: Busy
         CMD-->>API: code busy
-        API-->>APP: 무시한다
+        API-->>APP: ApiError busy
+        APP->>APP: 알리지 않고 1초 뒤 다시 부른다
     else 받기 시작
         ST-->>SVC: LoadGuard
         SVC->>PS: fetch_page(0, 1000)
         PS->>PAW: GET 첫 쪽
         PAW-->>PS: 1000건
-        PS-->>SVC: Animal 목록
+        PS-->>SVC: Page (1000건)
         SVC->>PS: fetch_page(1000, 1000)
         PS->>PAW: GET 둘째 쪽
         PAW--xPS: 15초 동안 응답 없음
@@ -170,6 +172,7 @@ sequenceDiagram
 - 실패하면 보관소에 손대지 않는다. 그래서 화면은 `query_animals`를 다시 부를 필요가 없다([[PAW-API-001]] 3장)
 - 중간 실패도 전체 실패다 — 1000건을 받아 둔 채 목록을 반쯤 바꾸지 않는다([[PAW-UC-001#UC-H1]] 2b)
 - 처음 켤 때의 실패도 같은 흐름이고, 화면만 UI-1의 7로 다르다
+- `busy`는 화면이 차례를 지키면 생기지 않는다(버튼이 이미 막혀 있다). 개발 중 화면만 다시 그려졌을 때처럼 생기면 알리지 않고 1초 뒤 다시 불러 받는 중 화면에 멈추지 않게 한다([[PAW-DOM-002#App]])
 
 ## SEQ-4 원래 공고 페이지 열기
 
@@ -232,16 +235,17 @@ sequenceDiagram
     alt 다르다
         GA-->>D: 실패 — 두 값을 보여준다
     else 같다
-        GA->>GA: npm ci · Rust 준비 · tauri build (TAURI_APP_PATH=backend)
-        GA->>GA: setup.exe가 20MB 이하인지 확인
-        GA->>REL: Release v0.2.0 · PawinhandBigCat_0.2.0_x64-setup.exe
+        GA->>GA: npm ci · Rust 준비 · cargo test
+        GA->>GA: scripts/build.ps1 — tauri build(TAURI_APP_PATH=backend) · 설치 파일 이름을 영문으로
+        GA->>GA: setup.exe가 20MB 이하인지 확인(build.ps1)
+        GA->>REL: gh release create v0.2.0 · PawinhandBigCat_0.2.0_x64-setup.exe
         D->>U: Release 링크를 나눠 준다
         U->>REL: setup.exe를 받아 설치 (UC-H6)
     end
 ```
 
 **읽을 때 볼 것**
-- 빌드·크기 확인 중 하나라도 실패하면 Release가 생기지 않는다([[PAW-UC-001#UC-A1]] 2a)
+- 테스트·빌드·크기 확인 중 하나라도 실패하면 Release가 생기지 않는다([[PAW-UC-001#UC-A1]] 2a). 그래서 Release는 빌드가 다 끝난 뒤 `gh`로 만든다([[PAW-INFRA-001]] 8.4)
 - 버전은 설정 한 곳에서만 오고, 태그는 그 값과 같아야 한다([[PAW-INFRA-001]] 8.4)
 
 ## 1. 대응표
@@ -263,6 +267,8 @@ sequenceDiagram
 - 진행 상태가 서비스 → 커맨드 → 채널로 가는 길이 [[PAW-DOM-002]] 3장 「service는 Tauri를 모른다」와 맞는다
 - 새로고침 실패 뒤 화면이 `query_animals`를 부르지 않아도 되는 이유(보관소가 그대로다)가 [[PAW-API-001]] 3장 표와 맞는다
 - 상세 보기(UC-H3)는 커맨드를 부르지 않는다 — [[PAW-API-001]] 2.4 「상세를 따로 묻는 커맨드는 없다」와 맞는다
+
+구현하며 고친 것(v2): `fetch_page`가 `Page { raw_count, animals }`를 돌려주고 더 받을지는 원래 건수로 정한다 · `busy`면 화면이 1초 뒤 다시 부른다 · 배포는 `tauri-action` 대신 `scripts/build.ps1` 뒤 `gh release`
 
 ## 3. 미결사항
 
