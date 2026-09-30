@@ -49,12 +49,13 @@ WSL에서는 리눅스용 결과물이 나오고 화면을 그리는 엔진도 �
 - 현재 사용자 설치(Tauri NSIS `installMode: currentUser`, 기본값)라 관리자 권한이 필요 없다
 - WebView2는 필요할 때만 내려받는다(`webviewInstallMode: downloadBootstrapper`, 기본값). 오프라인 설치본을 넣으면 크기가 20MB를 크게 넘는다
 - 덮어 설치는 앱 식별자가 같아야 된다. 식별자는 `io.github.hoyoungparkme.pawinhandbigcat`이고 **한 번 정한 뒤 바꾸지 않는다** — 바꾸면 이미 설치한 사람에게 새 버전이 덮어 설치되지 않고 따로 하나 더 깔린다
+- 첫 빌드에서 확인했다(2026-09-30): 설치 파일 1.95MB. 0.1.1을 0.1.0 위에 설치하면 「설치된 앱」 항목이 하나로 남고 버전만 바뀐다. 설치 마법사는 깔린 이전 버전을 알아보고 「설치하기 전에 제거하기」를 골라 둔 채 묻는다(조용히 설치(`/S`)하면 묻지 않고 덮어쓴다)
 
 #### C5 코드 서명을 하지 않는다
 
 출처: [[PAW-RFQ-001#Q8]]
 
-설치할 때 「Windows의 PC 보호」 경고가 뜬다. README에 넘기는 법을 그림과 함께 적는다([[PAW-PRD-001#R12]]). 자동 업데이트 기능은 쓰지 않는다(PRD 비목표).
+설치할 때 「Windows의 PC 보호」 경고가 뜬다. README에 넘기는 법을 그림과 함께 적는다([[PAW-PRD-001#R12]]) — 그림은 실제 창을 본떠 그린 두 장(`.github/images/smartscreen-1.png`·`-2.png`)이고, 실제 창과 모양이 조금 다를 수 있다고 그림에 적어 둔다. 자동 업데이트 기능은 쓰지 않는다(PRD 비목표).
 
 #### C6 데이터 원천은 포인핸드의 비공식 API다
 
@@ -67,7 +68,8 @@ WSL에서는 리눅스용 결과물이 나오고 화면을 그리는 엔진도 �
 출처: [[PAW-PRD-001#N2]]
 
 - 요청은 한 번에 하나씩, 앞 요청이 끝나고 0.3초 뒤에 보낸다. 한 요청은 15초가 넘으면 실패로 본다
-- 요청은 켤 때와 새로고침·다시 시도 때만 나간다. 한 번에 5번 안팎(4,225건 ÷ 1000건)
+- 요청은 켤 때와 새로고침·다시 시도 때만 나간다. 받는 중에 또 받으라고 하면 요청을 새로 보내지 않고 받던 결과를 함께 쓴다
+- 한 번에 5번 안팎이다. 쪽마다 1000건을 받되 앞 쪽과 50건을 겹쳐 950건씩 넘긴다 — 받는 사이 목록이 줄어도 빠뜨리지 않게. 4,225건이면 5번이다
 - 요청 머리의 User-Agent에 앱 이름·버전·저장소 주소를 밝힌다: `PawinhandBigCat/{버전} (+https://github.com/HoyoungParkme/fourinhand-crawl)`. 이런 형식(앱 이름/버전 + 저장소 주소)으로 보냈을 때 정상 응답하는 것을 확인했다
 
 #### C8 조건 값의 공백은 + 기호로 인코딩한다
@@ -157,7 +159,7 @@ flowchart LR
 |---|---|---|---|
 | 앱 틀 | Tauri | 2.12 | C3. 설치 파일이 작다(C4) |
 | 코어 언어 | Rust stable, MSVC 툴체인(`x86_64-pc-windows-msvc`) | — | Tauri의 Windows 빌드 조건 |
-| HTTP | reqwest | 0.13 | 쿼리 폼 인코딩(C8), 요청별 시간 제한(C7) |
+| HTTP | reqwest | 0.13 | 쿼리 폼 인코딩(C8), 요청별 시간 제한(C7). TLS는 Windows 기본(Schannel, `native-tls` 기능)을 쓴다 — 0.13 기본값(rustls + aws-lc)은 빌드 도구가 더 필요하다 |
 | JSON | serde · serde_json | — | 응답 검사와 변환 |
 | 날짜 | chrono | — | 8자리 날짜 읽기, 기간 계산(없는 날은 그 달 말일) |
 | 주소 인코딩 | percent-encoding | — | 공고번호를 괄호까지 인코딩해 링크를 만든다(C9) |
@@ -167,7 +169,7 @@ flowchart LR
 | 화면 빌드 | Vite | 8.3 | Tauri 공식 안내 조합 |
 | 웹 엔진 | WebView2 (Edge) | 이 PC 154 | Windows 11 기본 포함. 없으면 설치 중 받음(C4) |
 | 설치 파일 | Tauri 번들러 NSIS | — | 현재 사용자 설치·덮어 설치·한국어 설치 마법사 |
-| CI | GitHub Actions + `tauri-apps/tauri-action@v1` | — | [[PAW-UC-001#UC-A1]] |
+| CI | GitHub Actions + `scripts/build.ps1` + `gh release` | — | [[PAW-UC-001#UC-A1]]. 20MB 확인이 Release를 만들기 전에 끝나야 한다 — `tauri-action`은 빌드와 Release 올리기를 한 단계로 해서 쓰지 않는다. 로컬과 CI가 같은 스크립트로 빌드한다 |
 | 테스트 | `cargo test` | — | 몸무게 해석·쿼리 인코딩·주소 정리·거르기를 코어에서 검증. 화면은 1차에서 손으로 확인 |
 
 정확한 버전은 구현할 때 잠금 파일(`Cargo.lock`·`package-lock.json`)로 고정한다.
@@ -183,11 +185,11 @@ flowchart LR
 
 코어가 화면에 여는 커맨드는 셋이다. 이름과 입출력 모양은 API 문서에서 정한다.
 
-1. **받아오기** — 진행 상태를 채널로 보내며 전부 받는다. 다 받았을 때만 보관 중인 목록을 새것으로 바꾼다. 실패하면 이전 목록을 그대로 둔다([[PAW-UC-001#UC-H1]] 2b · [[PAW-UC-001#UC-H5]] 3a)
+1. **받아오기** — 진행 상태를 채널로 보내며 전부 받는다. 다 받았을 때만 보관 중인 목록을 새것으로 바꾼다. 실패하면 이전 목록을 그대로 둔다([[PAW-UC-001#UC-H1]] 2b · [[PAW-UC-001#UC-H5]] 3a). 받는 중에 또 부르면 새로 받지 않고 받던 결과를 함께 받는다(C7)
 2. **조회** — 조건(기준 kg·기간·시·도·정렬)을 받아 걸린 목록, 마릿수, 시·도별 마릿수를 돌려준다
 3. **링크 열기** — 공고번호와 종류(포인핸드·원문)를 받아 코어가 주소를 만들고, 허용된 곳인지 확인한 뒤 기본 브라우저로 연다
 
-거르기를 화면이 아니라 코어에 두는 이유: 받아온 목록이 코어에 있고, 몸무게 해석과 거르기 규칙을 한 언어로 함께 테스트할 수 있다. 걸린 결과는 수십~수백 건이라 조건을 바꿀 때마다 주고받아도 바로 끝난다.
+거르기를 화면이 아니라 코어에 두는 이유: 받아온 목록이 코어에 있고, 몸무게 해석과 거르기 규칙을 한 언어로 함께 테스트할 수 있다. 걸린 결과는 보통 수십~수백 건이라 조건을 바꿀 때마다 주고받아도 바로 끝난다. 기준을 0으로 낮춰 4,000마리 넘게 걸려도 0.3초 남짓이고, 화면은 카드를 60장씩 나눠 그린다.
 
 ## 5. 인증과 접근
 
@@ -195,7 +197,7 @@ flowchart LR
 |---|---|
 | 사용자 | 로그인이 없다. 설치한 사람이 곧 사용자다 |
 | 포인핸드 API | 인증 없는 공개 GET. User-Agent로 앱을 밝힌다(C7) |
-| 화면의 권한 | 화면에는 앱이 정의한 커맨드 셋만 연다. 파일·셸·HTTP·링크 열기 플러그인 권한을 화면에 주지 않는다 — 링크는 코어가 연다 |
+| 화면의 권한 | 화면에는 앱이 정의한 커맨드 셋과 앱 버전 읽기(`core:app:allow-version` — 앱 정보에 버전을 보인다)만 연다. 파일·셸·HTTP·링크 열기 플러그인 권한을 화면에 주지 않는다 — 링크는 코어가 연다 |
 | 링크 허용 목록 | 코어가 여는 주소는 `https://pawinhand.kr/…`와 `https://www.animal.go.kr/…`뿐이다([[PAW-UC-001#UC-S4]] 2a) |
 | 콘텐츠 보안 정책(CSP) | 화면은 앱 자체 파일과 사진 두 곳(`https://www.animal.go.kr`, `https://d12l2mexpetzlh.cloudfront.net`)에서만 불러온다. 나머지 외부 스크립트·연결은 막는다 |
 | GitHub Actions | 기본 `GITHUB_TOKEN`에 `contents: write`만 준다(Release 만들기). 서명 키 같은 비밀값이 없다(C5) |
@@ -207,8 +209,8 @@ flowchart LR
 |---|---|---|---|
 | 받아온 고양이 목록 | 코어 메모리 | 앱이 켜져 있는 동안 | 앱을 끄면 사라진다 |
 | 화면 조건(기준·기간·지역·정렬) | 화면 메모리 | 앱이 켜져 있는 동안. 다시 켜면 기본값 | 앱을 끄면 사라진다 |
-| 사진 캐시 | WebView2 데이터 폴더(`%LOCALAPPDATA%` 아래 앱 식별자 폴더) | WebView2가 관리 | 앱 제거 때 함께 지우는 선택지(9.2에서 확인) |
-| 앱 파일 | `%LOCALAPPDATA%` 아래 앱 폴더(현재 사용자 설치) | 설치부터 제거까지 | Windows 「앱 제거」 |
+| 사진 캐시 | WebView2 데이터 폴더(`%LOCALAPPDATA%\io.github.hoyoungparkme.pawinhandbigcat`) | WebView2가 관리 | 앱 제거 때 「애플리케이션 데이터 삭제하기」를 고르면 함께 지운다. 고르지 않으면 남는다 |
+| 앱 파일 | `%LOCALAPPDATA%\포인핸드 대형묘 찾기`(현재 사용자 설치) — `PawinhandBigCat.exe`·`uninstall.exe`. 시작 메뉴 바로 가기, 바탕 화면 바로 가기(설치 마지막 화면에서 고름) | 설치부터 제거까지 | Windows 「앱 제거」 |
 | 설치 파일 | GitHub Releases | 버전마다 남는다 | 배포자가 Release를 지운다 |
 | 소스와 명세 | GitHub 저장소 `HoyoungParkme/fourinhand-crawl` | 계속 | — |
 
@@ -246,11 +248,13 @@ Tauri CLI는 `frontend/`의 `package.json`에 들어 있고, Tauri 설정은 `ba
 | 할 일 | 명령(저장소 루트에서) | 하는 일 |
 |---|---|---|
 | 개발 실행 | `pwsh scripts/dev.ps1` | `TAURI_APP_PATH=backend`로 두고 `frontend/`에서 `npm run tauri dev` — Vite 개발 서버를 띄우고 코어를 빌드해 창을 연다 |
-| 설치 파일 만들기 | `pwsh scripts/build.ps1` | 같은 방식으로 `npm run tauri build`. 결과는 `backend/target/release/bundle/nsis/` |
+| 설치 파일 만들기 | `pwsh scripts/build.ps1` | 같은 방식으로 `npm run tauri build`. 설치 파일 이름을 영문으로 바꾸고(8.3) 20MB를 넘으면 실패한다. 결과는 `backend/target/release/bundle/nsis/` |
 | 코어 테스트 | `backend/`에서 `cargo test` | 네트워크 없이 도는 테스트만 |
 | 실데이터 점검 | `backend/`에서 `cargo test -- --ignored` | 7장 |
 
 `tauri.conf.json`은 화면을 `../frontend/dist`에서 읽고, 개발 때는 `http://localhost:5173`을 본다. 빌드 전후 명령(`npm run dev`·`npm run build`)은 Tauri가 화면 폴더(`frontend/`)에서 돌린다.
+
+처음 설치 파일을 만들 때 Tauri가 NSIS를 `%LOCALAPPDATA%\tauri`에 받아 푼다. 백신이 막 푼 파일을 검사하느라 폴더 이름 바꾸기가 막히면(「액세스가 거부되었습니다(os error 5)」) `build.ps1`이 반쯤 풀린 폴더(`nsis-*`)를 지우고 10초 뒤 한 번 더 만든다 — Tauri가 NSIS를 처음부터 다시 받는다. 그래도 막히면 조금 뒤 다시 실행한다.
 
 ### 8.3 설치 파일 설정
 
@@ -258,18 +262,18 @@ Tauri CLI는 `frontend/`의 `package.json`에 들어 있고, Tauri 설정은 `ba
 - `installMode: currentUser`, `webviewInstallMode: downloadBootstrapper`(C4)
 - 설치 마법사 언어: 한국어
 - 보이는 이름 「포인핸드 대형묘 찾기」, 실행 파일 `PawinhandBigCat.exe`
-- 설치 파일 이름: `PawinhandBigCat_{버전}_x64-setup.exe`. Tauri는 보이는 이름으로 설치 파일 이름을 지으므로 영문으로 맞추는 법을 첫 빌드에서 정한다(9.2)
+- 설치 파일 이름: `PawinhandBigCat_{버전}_x64-setup.exe`. Tauri는 보이는 이름으로 `포인핸드 대형묘 찾기_{버전}_x64-setup.exe`를 만든다. `scripts/build.ps1`이 이것을 영문 이름으로 바꾸고, 20MB를 넘으면 실패로 끝낸다. 한글 보이는 이름으로 NSIS 빌드·설치·시작 메뉴 모두 문제없다(첫 빌드에서 확인)
 
 ### 8.4 버전과 배포
 
 1. 버전은 **한 곳**(`backend/`의 Tauri 설정 `version`)에서만 관리한다
-2. 배포자가 버전을 올리고 같은 값으로 태그 `v{버전}`을 올린다
+2. 배포자가 실데이터 점검(7장)을 돌리고, 버전을 올려 같은 값으로 태그 `v{버전}`을 올린다
 3. GitHub Actions(`windows-latest`)가 돈다
    1. 태그와 설정의 버전이 다르면 멈춘다([[PAW-UC-001#UC-A1]] 1a)
-   2. Node·Rust를 준비하고 캐시를 쓴다(Rust 캐시 대상 `backend`)
-   3. `tauri-action`이 빌드하고 태그 이름의 Release를 만들어 `setup.exe`를 올린다. 초안이 아니라 바로 공개한다
-   4. 설치 파일이 20MB를 넘으면 실패로 끝낸다([[PAW-PRD-001#N3]])
-4. 빌드가 실패하면 Release가 생기지 않는다([[PAW-UC-001#UC-A1]] 2a)
+   2. Node·Rust를 준비하고 캐시를 쓴다(Rust 캐시 대상 `backend`). 코어 테스트(`cargo test --locked`)를 돈다
+   3. `scripts/build.ps1`로 빌드한다 — 로컬과 같은 스크립트다. 설치 파일 이름을 영문으로 바꾸고, 20MB를 넘으면 실패로 끝낸다([[PAW-PRD-001#N3]])
+   4. 다 되면 `gh release create`로 태그 이름의 Release를 만들어 `setup.exe`를 올린다. 초안이 아니라 바로 공개하고, 설명에 설치 안내와 비공식 안내(C12)를 적는다
+4. 어느 단계든 실패하면 Release가 생기지 않는다([[PAW-UC-001#UC-A1]] 2a)
 
 ## 9. 미결사항
 
@@ -282,6 +286,6 @@ Tauri CLI는 `frontend/`의 `package.json`에 들어 있고, Tauri 설정은 `ba
 
 - [x] [[PAW-UC-001#UC-S4]] 1단계를 C9에 맞게 고친다 — UC v3에서 반영했다
 - [x] Tauri CLI를 어느 폴더에서 실행할지 — `frontend/`에서 실행하고 `TAURI_APP_PATH`로 `backend/`를 알려 준다. 8.2에 명령으로 확정했다
-- [ ] 한글 보이는 이름으로 NSIS 빌드·시작 메뉴가 문제없는지, 설치 파일 이름을 영문으로 맞추는 법 — 첫 빌드로 확인한다. 한글 이름이 빌드를 깨면 보이는 이름을 영문으로 두고 한글은 창 제목에만 쓴다
-- [ ] 이전 버전 위에 새 `setup.exe`를 실행했을 때 덮어 설치되는지, 앱 제거 때 WebView2 데이터를 지우는 선택지가 있는지 — 첫 빌드로 확인한다
-- [ ] GitHub Actions의 `tauri-action`이 `projectPath: frontend`와 `TAURI_APP_PATH`로 `backend/`를 찾는지 — 첫 빌드로 확인한다. 못 찾으면 `scripts/build.ps1`로 빌드하고 `gh release`로 올리는 방식으로 바꾸고 3장·8.4를 고친다
+- [x] 한글 보이는 이름으로 NSIS 빌드·시작 메뉴가 문제없는지, 설치 파일 이름을 영문으로 맞추는 법 — 첫 빌드에서 빌드·설치·시작 메뉴 모두 문제없었다. 설치 파일 이름은 `build.ps1`이 영문으로 바꾼다(8.3)
+- [x] 이전 버전 위에 새 `setup.exe`를 실행했을 때 덮어 설치되는지, 앱 제거 때 WebView2 데이터를 지우는 선택지가 있는지 — 덮어 설치된다(「설치된 앱」 항목 하나, C4). 제거 마법사에 「애플리케이션 데이터 삭제하기」가 있고, 고르면 WebView2 데이터를 지운다(6장)
+- [x] GitHub Actions의 빌드 방식 — `tauri-action`은 시험하지 않고 `scripts/build.ps1` + `gh release`로 바꿨다. 20MB 확인이 Release를 만들기 전에 끝나야 하는데 `tauri-action`은 빌드와 Release 올리기를 한 단계로 한다. 3장·8.4를 고쳤다
