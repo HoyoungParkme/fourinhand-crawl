@@ -14,8 +14,8 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 - 항목 이름은 `타입.함수`다. `commands.rs`의 커맨드는 구조체가 없어 모듈 이름으로 `commands.load_animals`처럼 쓴다
 - 분기는 `if 조건 → 결과 · else → 결과`로 적는다
-- 도메인 오류 열거형은 `models.rs`에 있다: `FetchError { Busy, ConnectionFailed, Timeout, BadFormat, TooManyPages }` · `QueryError { NoSnapshot, InvalidCondition }` · `OpenLinkError { NoSnapshot, NotFound, NoSource, NotAllowed, OpenFailed(url) }` · `LinkError { NoSource, NotAllowed }`. 화면에 가는 코드로 바꾸는 곳은 `core/error.rs` 한 곳이다([[PAW-DOM-002#CommandError]])
-- 상수는 `core/config.rs`: `PAGE_SIZE = 1000` · `PAGE_GAP = 300ms` · `REQUEST_TIMEOUT = 15s` · `MAX_PAGES = 20` · `START_DATE = 20200101` · `MAX_KG_AS_KG = 30.0`
+- 도메인 오류 열거형은 `models.rs`에 있다: `FetchError { ConnectionFailed, Timeout, BadFormat, TooManyPages }` · `QueryError { NoSnapshot, InvalidCondition }` · `OpenLinkError { NoSnapshot, NotFound, NoSource, NotAllowed, OpenFailed(url) }` · `LinkError { NoSource, NotAllowed }`. 화면에 가는 코드로 바꾸는 곳은 `core/error.rs` 한 곳이다([[PAW-DOM-002#CommandError]])
+- 상수는 `core/config.rs`: `PAGE_SIZE = 1000` · `PAGE_OVERLAP = 50` · `PAGE_GAP = 300ms` · `REQUEST_TIMEOUT = 15s` · `MAX_PAGES = 20` · `START_DATE = 20200101` · `MAX_KG_AS_KG = 30.0`
 
 ## 1. 함수 목록
 
@@ -30,11 +30,13 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 | `Snapshot.new` | models.rs | 받은 목록 → 스냅숏(중복 빼기) |
 | `Snapshot.find` | models.rs | 공고번호로 한 마리 |
 | `Fetch.record_page` | models.rs | 한 쪽 세고 더 받을지 |
+| `Fetch.next_offset` | models.rs | 다음 쪽의 시작(겹쳐 받기) |
 | `SearchCondition.validate` | models.rs | 조건 값 검사 |
 | `SearchCondition.since` | models.rs | 기간의 첫날 |
 | `AnimalStore.current` | store.rs | 지금 스냅숏 |
 | `AnimalStore.replace` | store.rs | 스냅숏 통째로 갈기 |
-| `AnimalStore.try_begin_load` | store.rs | 「받는 중」 잡기 |
+| `AnimalStore.try_begin_load` | store.rs | 「받는 중」 잡기 또는 기다릴 표 |
+| `AnimalStore.wait_for_load` | store.rs | 받는 중인 받기의 결과 기다리기 |
 | `AnimalService.load` | service.rs | 전부 받아 스냅숏 갈기 |
 | `AnimalService.query` | service.rs | 거르기·세기·정렬 |
 | `AnimalService.open_link` | service.rs | 링크 만들고 열기 |
@@ -104,7 +106,7 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 2. `if http:// 로 시작 → https:// 로 바꾼다 · if https:// 로 시작 → 그대로 · if 다른 :// 가 있다 → 없음 · else(상대 경로) → CDN https://d12l2mexpetzlh.cloudfront.net/images/shelter/ + 앞의 / 를 뗀 글자`
 3. `if https://www.animal.go.kr/ 나 https://d12l2mexpetzlh.cloudfront.net/ 로 시작 → Photo · else → 없음`
 
-**테스트 관점** `http://www.animal.go.kr/files/a.jpg`→https · `more/more_1.jpg`→CDN 주소 · `ftp://x`·`https://evil.example/a.jpg`·빈 글자→없음
+**테스트 관점** `http://www.animal.go.kr/files/a.jpg`→https · `more/more_1.jpg`→CDN 주소 · `ftp://x`·`https://evil.example/a.jpg`·`https://www.animal.go.kr.evil.example/a.jpg`·빈 글자→없음
 
 근거: [[PAW-INFRA-001#C10]] · [[PAW-DOM-002#Photo]]
 
@@ -127,7 +129,7 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 **시그니처** `fn new(animals: Vec<Animal>, fetched_at: DateTime<FixedOffset>) -> Snapshot`
 
-**처리** 공고번호를 본 적이 있으면 뺀다(처음 것을 남긴다). 남은 것을 `Arc`로 싼다
+**처리** 공고번호를 본 적이 있으면 뺀다(처음 것을 남긴다 — 겹쳐 받은 건도 여기서 빠진다). 남은 것을 `Arc`로 싼다
 
 **테스트 관점** 같은 공고번호 두 건 → 한 건 · 순서는 받은 순서
 
@@ -139,21 +141,31 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 #### Fetch.record_page 한 쪽 세기
 
-**시그니처** `fn record_page(&mut self, raw_count: usize) -> Result<bool, FetchError>`
+**시그니처** `fn record_page(&mut self, offset: usize, raw_count: usize) -> Result<bool, FetchError>`
 
-**입력** 이번 쪽에서 포인핸드가 준 **원래 건수**(옮기다 버린 건을 빼기 전)
+**입력** 이번 쪽의 시작 `offset`과, 이번 쪽에서 포인핸드가 준 **원래 건수**(옮기다 버린 건을 빼기 전)
 
 **처리**
-1. `pages += 1`, `received += raw_count`
+1. `pages += 1`, `received = offset + raw_count`(겹쳐 받은 줄은 한 번만 세는 셈)
 2. `if raw_count == PAGE_SIZE 이고 pages >= MAX_PAGES → TooManyPages · if raw_count == PAGE_SIZE → 참(더 받는다) · else → 거짓(끝)`
 
-**테스트 관점** 1000·1000·225 → 참·참·거짓, received 2225 · 1000을 스무 번 → 스무 번째에 `TooManyPages` · 0건 → 거짓
+**테스트 관점** (0, 1000)·(950, 1000)·(1900, 225) → 참·참·거짓, received 2125 · 꽉 찬 쪽을 스무 번 → 스무 번째에 `TooManyPages` · 0건 → 거짓
+
+#### Fetch.next_offset 다음 쪽의 시작
+
+**시그니처** `fn next_offset(offset: usize) -> usize`
+
+**처리** `offset + PAGE_SIZE − PAGE_OVERLAP` — 앞 쪽과 50줄 겹친다. 받는 사이 앞쪽에서 빠진 아이가 있어 줄이 당겨져도 뒤 아이를 놓치지 않게. 겹쳐 받은 아이는 [[#Snapshot.new]]에서 한 번만 남는다
+
+**테스트 관점** 0 → 950 · 950 → 1900
+
+근거: [[PAW-UC-001#UC-S1]] 5 · [[PAW-DOM-001#Fetch]]
 
 #### SearchCondition.validate 조건 검사
 
 **시그니처** `fn validate(&self) -> Result<(), QueryError>`
 
-**처리** `if min_weight_kg가 유한하지 않거나 0보다 작다 → InvalidCondition · if Sido(이름)인데 이름이 비었다 → InvalidCondition · else → Ok`
+**처리** `if min_weight_kg가 유한하지 않거나 0보다 작다 → InvalidCondition · if Sido(이름)인데 이름이 비었거나 공백뿐이다 → InvalidCondition · else → Ok`
 
 #### SearchCondition.since 기간의 첫날
 
@@ -181,27 +193,41 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 #### AnimalStore.try_begin_load 받는 중 잡기
 
-**시그니처** `fn try_begin_load(&self) -> Option<LoadGuard<'_>>`
+**시그니처** `fn try_begin_load(&self) -> LoadTurn<'_>` — `LoadTurn::Mine(LoadGuard)` · `LoadTurn::Wait(끝난 받기의 수)`
 
-**처리** `if 「받는 중」을 거짓→참으로 바꾸는 데 성공 → LoadGuard · else → 없음`. `LoadGuard`가 떨어지면 거짓으로 되돌린다
+**처리** 받기 상태(`tokio::sync::watch` — 받는 중 · 끝난 받기의 수 · 마지막 결과)를 한 번에 보고 바꾼다. `if 받는 중이 아니다 → 받는 중으로 바꾸고 Mine(LoadGuard) · else → Wait(지금까지 끝난 받기의 수)`
+- `LoadGuard::finish(self, &결과)` — 받는 중을 풀고, 끝난 받기의 수를 하나 올리고, 마지막 결과로 적는다
+- `LoadGuard`가 `finish` 없이 떨어지면(패닉) `ConnectionFailed`로 적는다 — 기다리는 쪽이 멈추지 않게
 
-**테스트 관점** 두 번 연달아 → 두 번째는 없음 · 가드를 버린 뒤에는 다시 잡힌다
+**테스트 관점** 두 번 연달아 → 두 번째는 `Wait` · `finish` 뒤에는 다시 `Mine` · 가드를 그냥 버리면 기다리던 쪽이 `ConnectionFailed`를 받는다
+
+#### AnimalStore.wait_for_load 받기 결과 기다리기
+
+**시그니처** `async fn wait_for_load(&self, after: u64) -> Result<Arc<Snapshot>, FetchError>`
+
+**처리** 끝난 받기의 수가 `after`보다 커질 때까지 기다린 뒤 마지막 결과를 돌려준다. 이미 커져 있으면 바로 돌려준다 — 받는 중에 들어온 부르기가 새로 받지 않고 같은 결과를 받게
+
+**테스트 관점** 받는 중인 받기가 성공하면 기다리던 쪽이 같은 `Arc`를 받는다 · 실패하면 같은 오류
+
+근거: [[PAW-UC-001#UC-S1]] 1a
 
 #### AnimalService.load 전부 받기
 
 **시그니처** `async fn load(&self, on_page: impl Fn(usize)) -> Result<Arc<Snapshot>, FetchError>`
 
 **처리**
-1. `if store.try_begin_load()가 없다 → Busy`
+1. `store.try_begin_load()` — `if Wait(after) → store.wait_for_load(after)의 결과를 그대로 돌려준다`(새로 받지 않는다)
 2. `offset = 0`, 빈 목록, `Fetch::default()`
-3. 되풀이: `source.fetch_page(offset, PAGE_SIZE)` → 옮긴 동물을 목록에 더한다 → `fetch.record_page(page.raw_count)` → `on_page(fetch.received)` → `if 더 받는다 → offset += PAGE_SIZE, PAGE_GAP만큼 쉬고 다시 · else → 멈춘다`
-4. `Snapshot::new(목록, 지금 시각)` → `store.replace` → 그 `Arc`를 돌려준다
+3. 되풀이: `source.fetch_page(offset, PAGE_SIZE)` → 옮긴 동물을 목록에 더한다 → `fetch.record_page(offset, page.raw_count)` → `on_page(fetch.received)` → `if 더 받는다 → offset = Fetch::next_offset(offset), PAGE_GAP만큼 쉬고 다시 · else → 멈춘다`
+4. `if 목록이 비었다 → BadFormat`(요청 모양이 어긋나면 포인핸드는 빈 배열을 준다)
+5. `Snapshot::new(목록, 지금 시각)` → `store.replace` → 그 `Arc`
+6. 성공이든 실패든 결과를 `LoadGuard::finish`로 알리고 돌려준다
 
-**예외** | 받는 중 | `Busy` | · | 한 쪽이라도 실패 | 그 오류 그대로(받은 목록은 버리고 `replace`를 부르지 않는다) |
+**예외** | 한 쪽이라도 실패 | 그 오류 그대로(받은 목록은 버리고 `replace`를 부르지 않는다) | · | 한 마리도 없음 | `BadFormat` |
 
-**호출하는 것** [[#AnimalStore.try_begin_load]] · `AnimalSource.fetch_page`(앱에서는 [[#PawinhandSource.fetch_page]]) · [[#Fetch.record_page]] · [[#Snapshot.new]] · [[#AnimalStore.replace]]
+**호출하는 것** [[#AnimalStore.try_begin_load]] · [[#AnimalStore.wait_for_load]] · `AnimalSource.fetch_page`(앱에서는 [[#PawinhandSource.fetch_page]]) · [[#Fetch.record_page]] · [[#Fetch.next_offset]] · [[#Snapshot.new]] · [[#AnimalStore.replace]]
 
-**테스트 관점**(가짜 원천으로) 1000·225 두 쪽 → 스냅숏 1225건, `on_page`가 1000·1225로 두 번 · 둘째 쪽 `Timeout` → 오류, 옛 스냅숏 그대로 · 받는 동안 다시 부르면 `Busy` · 끝난 뒤 다시 부를 수 있다 · **옮기다 버린 건이 있어도 원래 건수가 1000이면 다음 쪽을 받는다**
+**테스트 관점**(가짜 원천으로) 1000·225 두 쪽 → 요청 `offset` 0·950, `on_page`가 1000·1175로 두 번, 스냅숏 1225건 · 첫 쪽 1000건과 겹친 50건을 포함한 둘째 쪽 60건 → 스냅숏 1010건 · 둘째 쪽 `Timeout` → 오류, 옛 스냅숏 그대로 · 빈 쪽만 옴 → `BadFormat`, 옛 스냅숏 그대로 · 받는 동안 다시 부르면 새로 받지 않고(원천을 한 번만 부른다) 같은 `Arc`를 받는다 · 받는 중인 받기가 실패하면 기다린 쪽도 같은 오류 · 끝난 뒤 다시 부르면 새로 받는다 · **옮기다 버린 건이 있어도 원래 건수가 1000이면 다음 쪽을 받는다**
 
 근거: [[PAW-SEQ-001#SEQ-1]] · [[PAW-SEQ-001#SEQ-3]] · [[PAW-UC-001#UC-S1]]
 
@@ -214,7 +240,7 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 2. `since = condition.since(today)`
 3. 기본 걸림 = `weight.at_least(min)` 이고 `if since가 있으면 registered_on >= since`
 4. 시·도 목록 = 스냅숏 전체에 있는 시·도들. 시·도별 마릿수 = 기본 걸림 가운데 그 시·도인 수(0 포함). `if 스냅숏에 시·도 없는 아이가 있다 → Unknown 한 줄 더`. `all_count` = 기본 걸림 수
-5. `if 조건이 Sido(이름)인데 시·도 목록에 없다 → 지역을 All로 바꾸고 region_reset = 참`
+5. `if 조건이 Sido(이름)인데 시·도 목록에 없다 · if 조건이 Unknown인데 Unknown 줄이 없다 → 지역을 All로 바꾸고 region_reset = 참`
 6. 기본 걸림을 `region.matches`로 거른다
 7. 정렬: `if Weight → kg 내림 → 등록일 내림 → 공고번호 오름 · if Registered → 등록일 내림 → kg 내림 → 공고번호 오름`
 
@@ -222,7 +248,7 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 **호출하는 것** [[#SearchCondition.validate]] · [[#AnimalStore.current]] · [[#SearchCondition.since]] · [[#Weight.at_least]] · [[#Region.matches]]
 
-**테스트 관점** 2026-09-30 표본 15마리: 기준 8·전체 → 15, 무거운 순 첫째 15.0kg · 경기도 → 4 · 경기도+3개월 → 2 · 전국+3개월 → 6 · 기준 7 → 15보다 많다 · `Sido("없는도")` → 전국으로 바꿔 15, `region_reset` 참 · 경상남도(목록에 있으나 0마리) → 0, 초기화 없음 · 스냅숏 없음 → `NoSnapshot` · 기준 -1 → `InvalidCondition`
+**테스트 관점** 2026-09-30 표본 15마리: 기준 8·전체 → 15, 무거운 순 첫째 15.0kg · 경기도 → 4 · 경기도+3개월 → 2 · 전국+3개월 → 6 · 기준 7 → 28 · `Sido("없는도")` → 전국으로 바꿔 15, `region_reset` 참 · 시·도 없는 아이가 없는 스냅숏에서 `Unknown` → 전국으로 바꾸고 `region_reset` 참 · 경상남도(목록에 있으나 0마리) → 0, 초기화 없음 · 스냅숏 없음 → `NoSnapshot` · 기준 -1 → `InvalidCondition`
 
 근거: [[PAW-SEQ-001#SEQ-2]] · [[PAW-UC-001#UC-S3]]
 
@@ -238,7 +264,7 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 **호출하는 것** [[#AnimalStore.current]] · [[#Snapshot.find]] · [[#Link.for_animal]] · `LinkOpener.open`(앱에서는 [[#TauriOpener.open]])
 
-**테스트 관점**(가짜 열개로) 성공하면 연 주소가 적힌다 · 열개가 실패하면 `OpenFailed`에 주소가 담긴다 · 없는 공고번호 → `NotFound`
+**테스트 관점**(가짜 열기로) 성공하면 연 주소가 적힌다 · 열기가 실패하면 `OpenFailed`에 주소가 담긴다 · 없는 공고번호 → `NotFound` · 원문 번호 없는 아이의 원문 → `NoSource`이고 열기를 부르지 않는다
 
 근거: [[PAW-SEQ-001#SEQ-4]]
 
@@ -250,12 +276,12 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 1. `page_url(offset, limit, 오늘)`로 GET. 시간 제한 15초, User-Agent `PawinhandBigCat/{버전} (+저장소 주소)`
 2. `if 시간 초과 → Timeout · if 연결·요청 실패 → ConnectionFailed · if 상태 코드가 2xx가 아니다 → BadFormat`
 3. 본문을 JSON으로 읽는다. `if JSON 배열이 아니다 → BadFormat`
-4. 배열의 객체마다 `to_animal`. 객체가 아니거나 옮기지 못한 건은 버린다
+4. 배열의 객체마다 `to_animal`. 객체가 아니거나 옮기지 못한 건은 버린다. `if 원래 건수가 있는데 한 마리도 옮기지 못했다 → BadFormat`(칸 이름·날짜 모양이 바뀐 것)
 5. `Page { raw_count: 배열 길이, animals }`
 
 **호출하는 것** [[#PawinhandSource.page_url]] · [[#PawinhandSource.to_animal]]
 
-**테스트 관점** 실데이터 점검(`#[ignore]`): 실제로 한 쪽 받아 1000건, 필수 칸이 다 있다
+**테스트 관점** 빈 배열 → 원래 건수 0 · 칸 이름이 바뀐 건만 온 쪽 → `BadFormat` · 옮길 수 있는 건과 섞인 쪽 → 옮긴 것만 · 실데이터 점검(`#[ignore]`): 실제로 한 쪽 받아 1000건, 99% 넘게 옮겨지고 필수 칸이 다 있다, 원문 공고 하나를 열어 번호가 있다, 사진 하나가 그림으로 열린다
 
 근거: [[PAW-API-001]] `load_animals` · [[PAW-INFRA-001#C7]]
 
@@ -274,7 +300,7 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 **처리**
 1. 칸 읽기: 문자열이면 그대로, 수면 글자로. 앞뒤 공백을 지우고 `if 비었다 → 없음`
 2. `if notify_number가 없다 → 버린다`
-3. `registration_date`·`notify_sdt`·`notify_edt`를 8자리 날짜로. `if 하나라도 못 읽는다 → 버린다`
+3. `registration_date`·`notify_sdt`·`notify_edt`를 8자리 날짜로. `if 8자리 숫자가 아니거나 없는 날이다(20251041 등) → 버린다`
 4. `Weight::parse(weight 칸의 원래 글자)` — 공백을 지우지 않은 글자
 5. 사진: `more_image1` → `image` → `image2` → `image3` 순서로 `Photo::from_raw`, 같은 주소는 뺀다
 6. `source_no = source_no(detail_url)`
@@ -282,7 +308,7 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 **호출하는 것** [[#Weight.parse]] · [[#Photo.from_raw]] · [[#PawinhandSource.source_no]]
 
-**테스트 관점** 2026-09-30 실제 응답 한 건(`경기-화성-2026-01287`)을 JSON 그대로 넣어 모든 칸 확인 · 공고번호 없는 건 → 없음 · 날짜 `2026-13-01` → 없음 · `sex: "X"` → 성별 없음 · 주소 끝 공백이 지워진다
+**테스트 관점** 2026-09-30 실제 응답 한 건(`경기-화성-2026-01287`)을 JSON 그대로 넣어 모든 칸 확인 · 공고번호 없는 건 → 없음 · 날짜 `20261301`·`2026-08-30`·`20251041` → 없음 · `sex: "X"` → 성별 없음 · 주소 끝 공백이 지워진다
 
 #### PawinhandSource.source_no 원문 번호
 
@@ -298,29 +324,29 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 
 **시그니처** `fn open(&self, url: &str) -> Result<(), OpenError>`
 
-**처리** `app.opener().open_url(url, None)` — `if 실패 → OpenError`
+**처리** `app.opener().open_url(url, None)` — `if 실패 → OpenError`. 기본 브라우저가 정해지지 않은 PC에서는 Windows가 직접 「앱 선택」 창을 띄우고 실패를 돌려주지 않을 수 있다
 
 #### commands.load_animals 받아오기 커맨드
 
 **시그니처** `async fn load_animals(state: State<AppService>, on_progress: Channel<FetchProgressDto>) -> Result<LoadResultDto, CommandError>`
 
-**처리** `service.load(|n| on_progress.send({ received: n }))` → `if 성공 → { fetchedAt: RFC 3339, total: 스냅숏 건수 } · else → CommandError`
+**처리** `service.load(|n| on_progress.send({ received: n }))` → `if 성공 → { fetchedAt: RFC 3339, total: 스냅숏 건수 } · else → CommandError`. 채널이 끊겨도(화면을 다시 불러옴) 받기는 끝까지 한다
 
 **호출하는 것** [[#AnimalService.load]]
 
 #### commands.query_animals 조회 커맨드
 
-**시그니처** `fn query_animals(state: State<AppService>, condition: ConditionDto) -> Result<QueryResultDto, CommandError>`
+**시그니처** `async fn query_animals(state: State<AppService>, condition: ConditionDto) -> Result<QueryResultDto, CommandError>`
 
-**처리** DTO → `SearchCondition` · 오늘 = `Local::now().date_naive()` · `service.query` → 동물마다 `AnimalDto::from_model(animal, 오늘)`(여기서 `notice.status`를 계산)
+**처리** DTO → `SearchCondition`(`into_condition` — 빠진 칸·글자로 온 수·목록 밖의 값이면 `InvalidCondition`) · 오늘 = `Local::now().date_naive()` · `service.query` → 동물마다 `AnimalDto::from_model(animal, 오늘)`(여기서 `notice.status`를 계산). 걸린 동물이 수천 마리면 옮기기·직렬화가 무거워 메인 스레드 밖(async)에서 돈다
 
 **호출하는 것** [[#AnimalService.query]] · [[#NoticePeriod.status]]
 
 #### commands.open_link 링크 커맨드
 
-**시그니처** `fn open_link(state: State<AppService>, notice_no: String, kind: LinkKindDto) -> Result<OpenLinkResultDto, CommandError>`
+**시그니처** `async fn open_link(state: State<AppService>, notice_no: String, kind: LinkKindDto) -> Result<OpenLinkResultDto, CommandError>`
 
-**처리** `service.open_link` → `if 성공 → { url } · else → CommandError`(`OpenFailed`면 `url` 함께)
+**처리** `service.open_link` → `if 성공 → { url } · else → CommandError`(`OpenFailed`면 `url` 함께). 브라우저를 띄우는 동안 창이 멈추지 않게 메인 스레드 밖(async)에서 돈다
 
 **호출하는 것** [[#AnimalService.open_link]]
 
@@ -329,9 +355,9 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 | 무엇 | 어디 | 언제 |
 |---|---|---|
 | 순수 규칙(몸무게·사진·링크·기간·쪽 세기·보관소) | 각 파일의 `#[cfg(test)]` | `cargo test` 때마다 |
-| 서비스(가짜 원천·가짜 열개) | `service.rs` | `cargo test` 때마다 |
-| 옮기기(실제 응답 한 건 JSON) | `adapters/pawinhand.rs` | `cargo test` 때마다 |
-| 조회 표본(2026-09-30의 8kg 이상 15마리와 그 주변) | `service.rs` | `cargo test` 때마다 |
+| 서비스(가짜 원천·가짜 열기) | `service.rs` | `cargo test` 때마다 |
+| 옮기기(실제 응답 한 건 JSON, 한 마리도 못 옮긴 쪽) | `adapters/pawinhand.rs` | `cargo test` 때마다 |
+| 조회 표본(2026-09-30 실데이터에서 7kg 이상 전부와 나머지 시·도마다 한 마리 — `fixtures/sample-2026-09-30.json` 35건) | `service.rs` | `cargo test` 때마다 |
 | 실데이터 점검 | `adapters/pawinhand.rs`의 `#[ignore]` | 배포 전 `cargo test -- --ignored`([[PAW-INFRA-001]] 7장) |
 
 ## 4. 화면 쪽 함수
@@ -341,16 +367,27 @@ upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 | `loadAnimals(onProgress)` | api/animals.ts | `Channel`을 만들어 `onmessage`로 `received`를 넘기고 `invoke('load_animals', { onProgress })` |
 | `queryAnimals(condition)` | api/animals.ts | `invoke('query_animals', { condition })` |
 | `openLink(noticeNo, kind)` | api/animals.ts | `invoke('open_link', { noticeNo, kind })` |
-| `refresh()` | App.tsx | `if 처음 → UI-1의 6 · else → 1.3을 「받는 중…」으로`. 성공하면 지금 조건으로 조회, `regionReset`이면 지역을 전국으로 돌리고 초록 띠. 실패하면 `if 처음 → 7 · else → 8` |
-| `changeCondition(next)` | App.tsx | 요청 번호를 올리고 조회. 돌아온 결과의 번호가 마지막 번호일 때만 그린다 |
+| `toApiError(error)` | api/animals.ts | `if { code }가 있다 → 그대로 · else → { code: 'bad-format', message }` |
+| `sameCondition(a, b)` · `sameRegion(a, b)` | api/animals.ts | 기준·기간·정렬·지역(시·도는 이름까지)이 모두 같은지 |
+| `refresh()` | App.tsx | `if 처음 → UI-1의 6 · else → 1.3을 「받는 중…」으로`. 받기가 성공하면 지금 조건으로 조회(조회가 실패해도 받기 실패로 알리지 않는다), `regionReset`이면 지역을 전국으로 돌리고 초록 띠. 받기가 실패하면 `if 처음 → 7 · else → 8` |
+| `changeCondition(next)` | App.tsx | `if 지금 조건과 같다 → 아무것도 하지 않는다 · else → 요청 번호를 올리고 조회`. 돌아온 결과의 번호가 마지막 번호일 때만 그린다 |
+| 날짜 바뀜 확인 | App.tsx | 1분마다 오늘을 보고, 마지막으로 조회한 날과 다르면 지금 조건으로 다시 조회한다 |
+| `openLinkFor(noticeNo, kind)` | App.tsx | 성공하면 그 아이 상세의 실패 안내를 지운다. `open-failed`·`not-allowed`면 앱 정보를 닫고 그 아이의 상세를 실패 상태로 연다(열려 있으면 그 자리에) |
+| `parseKg(text)` | ListPage.tsx | `,` → `.` 뒤 `if 10진수(12 · 12. · 12.3 · .5)가 아니다 → 없음 · else → 0.1 단위로 반올림, 유한하지 않으면 없음` |
+| 눈금자 | ListPage.tsx | 왼쪽 버튼만. 누르면 먼저 포커스를 가져오고, 끄는 동안은 칸·핀만 바꾸고(`onDrag`), 놓을 때 한 번 `onChange`. 키보드 ←↓·→↑ 0.1kg, PageDown·PageUp 1kg, Home 0, End 20 |
+| 카드 묶음 그리기 | ListPage.tsx | 처음 60장. 목록 끝이 800px 안으로 들어오면 60장 더. 조건이 바뀌면 처음 60장부터 |
 | `formatKg(kg)` | text/format.ts | 소수 한 자리(`15` → `15.0`) |
-| `formatAge(raw)` | text/format.ts | `if 2017(년생) → 2017년생 · if 2026(60일미만)(년생) → 2026년생 (60일 미만) · else → 받은 글자` |
+| `formatCount(n)` | text/format.ts | 천 단위 쉼표(`4225` → `4,225`) |
+| `formatAge(raw)` | text/format.ts | `if 2017(년생) → 2017년생 · if 2026(60일미만)(년생) → 2026년생 (60일 미만)(일 수는 받은 대로) · else → 받은 글자` |
 | `formatSex(code)` · `formatNeutered(code)` | text/format.ts | `M 수컷 · F 암컷 · Q 성별 미상` · `Y 했음 · N 안 했음 · U 미확인` |
+| `formatWho(animal)` · `formatWhere(animal)` | text/format.ts | 「나이 성별」(나이가 비면 성별만) · 「보호소 이름, 시·도 시·군·구」(시·도가 비면 시·군·구만, 시·군·구가 시·도와 같으면 한 번만) |
 | `formatPeriod(start, end, short)` | text/format.ts | `if short이고 같은 해 → 2026.08.30 ~ 08.30 · else → 2026.08.30 ~ 2026.08.30` |
 | `formatFetchedAt(iso, now)` | text/format.ts | `if 같은 날 → 오늘 14:02 · else → 9월 29일 14:02` |
+| `periodText(period)` · `regionText(region)` | text/format.ts | 「전체 기간·최근 1년·최근 6개월·최근 3개월」 · 「전국·시·도 이름·지역 미상」 |
 | `withCopula(word)` | text/format.ts | `if 끝 글자가 받침 있는 한글 → 이에요 · else → 예요` |
-| `failureText(code)` | text/format.ts | [[PAW-UI-001#UI-1]] 규칙의 실패 표 그대로 제목·이유 |
+| `failureText(code)` | text/format.ts | [[PAW-UI-001#UI-1]] 규칙의 실패 표 그대로 제목·이유. 표에 없는 코드는 형식 이상 문구 |
 
 ## 5. 미결사항
 
 - [x] 없음. 쓰면서 찾은 것은 반영했다: `fetch_page`가 원래 건수(`raw_count`)를 함께 돌려주고, 더 받을지는 그 수로 정한다 — 옮기다 버린 건 때문에 1000보다 적어져 다음 쪽을 놓치지 않게
+- [x] v2(구현·코드 리뷰): 쪽을 50줄 겹쳐 받는다, 받는 중에 또 부르면 `Busy` 대신 함께 기다린다, 한 마리도 못 옮기면 `BadFormat`, 지역 미상도 사라지면 초기화, 커맨드 셋 모두 async
