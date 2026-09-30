@@ -57,7 +57,7 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 ## 2. 도구
 
-#### load_animals
+#### load_animals 보호중 고양이 받아오기
 
 포인핸드에서 보호중 고양이를 전부 받아, 다 받았을 때만 코어의 목록을 새것으로 바꾼다.
 
@@ -108,7 +108,7 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 **연관**: [[PAW-UC-001#UC-H1]] · [[PAW-UC-001#UC-H5]] · [[PAW-DOM-001#Fetch]] · [[PAW-DOM-001#Snapshot]] · [[PAW-UI-001#UI-1]]
 
-#### query_animals
+#### query_animals 거르고 정렬하기
 
 들고 있는 목록을 조건으로 거르고 정렬해 돌려준다. 포인핸드에 요청하지 않는다.
 
@@ -202,7 +202,7 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 **연관**: [[PAW-UC-001#UC-H1]] · [[PAW-UC-001#UC-H2]] · [[PAW-UC-001#UC-H5]] · [[PAW-DOM-001#SearchCondition]] · [[PAW-DOM-001#SearchResult]] · [[PAW-UI-001#UI-1]] · [[PAW-UI-001#UI-2]]
 
-#### open_link
+#### open_link 공고 페이지 열기
 
 한 아이의 포인핸드 상세나 국가동물보호정보시스템 원문 공고를 기본 브라우저로 연다. 주소는 코어가 만든다 — 화면은 공고번호와 종류만 넘긴다.
 
@@ -252,7 +252,7 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 | `registeredOn` | 날짜 | 등록일(`registration_date`) |
 | `weight` | `{ kg: 수, raw: 문자열 }` | 해석값과 원래 값(`weight`). 결과에 나오는 동물은 `kg`가 늘 있다 |
 | `notice` | `{ start: 날짜, end: 날짜, status: "notice" 또는 "protected" }` | 공고 기간(`notify_sdt`·`notify_edt`)과 상태 |
-| `region` | `{ sido: 문자열 또는 null, sigungu: 문자열 }` | `city`·`country` |
+| `region` | `{ sido: 문자열 또는 null, sigungu: 문자열 또는 null }` | `city`·`country`. 빈 값은 null(1장 빈 값 규칙) |
 | `photos` | 문자열 배열(0~4) | https로 정리한 사진 주소. [[PAW-DOM-001#Photo]] 순서. 화면은 앞 3장을 쓴다 |
 | `hasSourceNotice` | 참·거짓 | 원문 번호가 있는지. 번호 자체는 보내지 않는다 |
 | `breed` · `color` · `age` · `feature` · `foundAt` | 문자열 또는 null | `s_breeds` · `color` · `age` · `feature` · `find_location`. `age`는 받은 글자 그대로 — 모양 바꾸기는 화면이 한다 |
@@ -279,4 +279,4 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 ## 4. 미결사항
 
-- [ ] **UI 문서 후속 수정** — [[PAW-UI-001#UI-1]] 규칙에 「카드의 『포인핸드에서 보기』(5.6)가 `open-failed`·`not-allowed`로 실패하면 그 아이의 UI-2를 열어 6(또는 『열 수 없는 주소예요』)을 보여준다」를 더한다. UI-1에는 실패를 보여줄 자리가 없어서다. 사용자가 정할 것은 아니다
+- [x] **UI 문서 후속 수정** — 반영했다: 카드의 「포인핸드에서 보기」가 `open-failed`·`not-allowed`로 실패하면 그 아이의 UI-2를 열어 알린다([[PAW-UI-001#UI-1]] 규칙 · [[PAW-UI-001#UI-2]] 진입)
