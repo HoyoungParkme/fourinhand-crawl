@@ -43,7 +43,7 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 | code | 커맨드 | 뜻 | 화면 |
 |---|---|---|---|
-| `busy` | load_animals | 이미 받는 중이다 | 무시한다 — 버튼이 이미 막혀 있다 |
+| `busy` | load_animals | 이미 받는 중이다 | 알리지 않는다 — 버튼이 이미 막혀 있다. 그래도 생기면 1초 뒤 다시 부른다 |
 | `connection-failed` | load_animals | 포인핸드에 닿지 못했다 | UI-1의 7·8 |
 | `timeout` | load_animals | 한 요청이 15초를 넘었다 | UI-1의 7·8 |
 | `bad-format` | load_animals | 오류 응답이거나 JSON 배열이 아니다 | UI-1의 7·8 |
@@ -102,8 +102,8 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 **코어가 하는 일** ([[PAW-UC-001#UC-S1]])
 - 요청: `GET https://pawinhand.net/bridge/animals/condition` — `city=모든 지역`, `country=전체`, `species=고양이`, `breeds=전체`, `state=보호중`, `sex=전체`, `neutral=전체`, `start_date=20200101`, `end_date=오늘`, `offset`, `limit=1000`. 폼 인코딩으로 공백은 `+`([[PAW-INFRA-001#C8]]). User-Agent는 `PawinhandBigCat/{버전} (+https://github.com/HoyoungParkme/fourinhand-crawl)`([[PAW-INFRA-001#C7]])
-- 한 번에 한 요청. 앞 요청이 끝나고 0.3초 뒤 다음 쪽. 1000건보다 적게 오면 끝
-- 한 건씩 옮긴다: 몸무게 해석([[PAW-DOM-001#Weight]]), 사진 주소 정리([[PAW-DOM-001#Photo]]), `detail_url`에서 원문 번호 꺼내기([[PAW-DOM-001#Link]]), 빈 값 `null`. 공고번호가 없는 건은 버린다
+- 한 번에 한 요청. 앞 요청이 끝나고 0.3초 뒤 다음 쪽. 포인핸드가 준 건수가 1000보다 적으면 끝
+- 한 건씩 옮긴다: 몸무게 해석([[PAW-DOM-001#Weight]]), 사진 주소 정리([[PAW-DOM-001#Photo]]), `detail_url`에서 원문 번호 꺼내기([[PAW-DOM-001#Link]]), 빈 값 `null`. 공고번호가 없거나 날짜(등록일·공고 기간)를 못 읽는 건은 버린다
 - 다 받으면 공고번호 중복을 빼고 목록을 통째로 바꾼 뒤 결과를 돌려준다. 중간에 실패하면 받은 일부를 버린다([[PAW-UC-001#UC-H1]] 2b)
 
 **연관**: [[PAW-UC-001#UC-H1]] · [[PAW-UC-001#UC-H5]] · [[PAW-DOM-001#Fetch]] · [[PAW-DOM-001#Snapshot]] · [[PAW-UI-001#UI-1]]
@@ -275,7 +275,7 @@ upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 
 - 숫자 칸(UI-1의 2.1)은 입력이 멈추고 150ms 뒤, 올바른 값일 때만 `query_animals`를 부른다. 눈금자(2.2)는 끄는 동안 값이 바뀔 때마다 불러도 된다 — 코어 메모리만 보는 호출이라 가볍다
 - `load_animals`가 도는 동안에도 `query_animals`와 `open_link`는 부를 수 있다. 이전 목록으로 답한다
-- `busy`·`no-snapshot`·`not-found`·`no-source`는 이 차례를 지키면 생기지 않는다. 생기면 화면은 아무것도 바꾸지 않고 개발 중 콘솔에만 남긴다
+- `busy`·`no-snapshot`·`not-found`·`no-source`는 이 차례를 지키면 생기지 않는다. 생기면 화면은 아무것도 바꾸지 않는다 — `busy`는 1초 뒤 `load_animals`를 다시 불러 받는 중 화면에 멈추지 않게 하고(개발 중 화면만 다시 그려졌을 때), 나머지는 개발 중 콘솔에만 남긴다
 
 ## 4. 미결사항
 
