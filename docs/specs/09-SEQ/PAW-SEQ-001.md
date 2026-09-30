@@ -50,19 +50,21 @@ sequenceDiagram
     API->>CMD: invoke load_animals (진행 채널)
     CMD->>SVC: load(on_page)
     SVC->>ST: try_begin_load()
-    ST-->>SVC: LoadGuard
+    ST-->>SVC: Mine(LoadGuard)
     loop 1000건보다 적게 올 때까지 (최대 20쪽)
         SVC->>PS: fetch_page(offset, 1000)
         PS->>PAW: GET 고양이 · 보호중 · 2020-01-01~오늘 · offset · limit=1000
         PAW-->>PS: JSON 배열
         PS-->>SVC: Page (원래 건수 · 옮긴 Animal — 칸 옮기기 · 몸무게 해석)
-        SVC->>SVC: fetch.record_page(원래 건수)
+        SVC->>SVC: fetch.record_page(offset, 원래 건수)
         SVC-->>CMD: on_page(received)
         CMD--)API: 채널 received
         API--)APP: UI-1의 6에 받은 마릿수
-        Note over SVC: 더 받을 때만 0.3초 쉰다
+        Note over SVC: 더 받을 때만 0.3초 쉬고, 다음 쪽은 50건 겹쳐(offset 0 · 950 · 1900 …)
     end
+    Note over SVC: 한 마리도 없으면 bad-format — replace를 부르지 않는다
     SVC->>ST: replace(Snapshot)
+    SVC->>ST: LoadGuard.finish(결과)
     SVC-->>CMD: Snapshot
     CMD-->>API: fetchedAt · total
     API-->>APP: LoadResult
@@ -79,8 +81,8 @@ sequenceDiagram
 
 **읽을 때 볼 것**
 - `replace`는 마지막 쪽까지 받은 뒤 **한 번만** 불린다. 받는 동안 보관소의 목록은 바뀌지 않는다([[PAW-DOM-002#AnimalStore]])
-- 더 받을지는 포인핸드가 준 **원래 건수**로 정한다 — 옮기다 버린 건 때문에 1000보다 적어져 다음 쪽을 놓치지 않게([[PAW-DOM-002#Fetch]])
-- `LoadGuard`는 `load`가 끝날 때 떨어져 「받는 중」이 풀린다. 성공이든 실패든 같다
+- 더 받을지는 포인핸드가 준 **원래 건수**로 정한다 — 옮기다 버린 건 때문에 1000보다 적어져 다음 쪽을 놓치지 않게([[PAW-DOM-002#Fetch]]). 겹쳐 받은 아이는 `Snapshot`에 한 번만 남는다
+- `LoadGuard.finish`는 `load`가 끝날 때 결과를 알리고 「받는 중」을 푼다. 성공이든 실패든 같다
 - 진행 상태는 서비스가 아니라 커맨드가 채널로 보낸다 — 서비스는 Tauri를 모른다(클래스 명세 3장)
 - 화면은 `load_animals`가 끝난 뒤에야 `query_animals`를 부른다([[PAW-API-001]] 3장). 오늘 날짜는 커맨드가 부를 때마다 읽는다
 
@@ -112,7 +114,7 @@ sequenceDiagram
         APP->>APP: 이 결과를 버린다
     end
     U->>LP: 몸무게 칸에 7을 넣는다
-    Note over LP,APP: 입력이 멈추고 150ms 뒤에만 부른다
+    Note over LP,APP: 입력이 멈추고 150ms 뒤에만 부른다. 눈금자는 끄는 동안 부르지 않고 놓을 때 한 번
     LP->>APP: changeCondition(min 7)
     Note over APP,SVC: 같은 흐름을 한 번 더 — 포인핸드에는 요청하지 않는다
 ```
@@ -120,11 +122,11 @@ sequenceDiagram
 **읽을 때 볼 것**
 - 이 흐름에는 포인핸드 API가 없다. 거르기는 코어 메모리만 본다([[PAW-API-001]] 1장 「네트워크」)
 - 결과가 뒤바뀌어 도착해도 가장 마지막에 부른 요청의 결과만 그린다([[PAW-DOM-002#App]])
-- 숫자 칸에 잘못된 값이 들어오면 `changeCondition`을 부르지 않는다 — 화면이 먼저 막는다(UI-1의 11)
+- 숫자 칸에 잘못된 값이 들어오면 `changeCondition`을 부르지 않는다 — 화면이 먼저 막는다(UI-1의 11). 지금과 같은 조건이어도 부르지 않는다
 
 ## SEQ-3 새로고침이 실패해도 보던 목록은 그대로
 
-[[PAW-UC-001#UC-H5]] 확장 1a · 3a, [[PAW-UC-001#UC-S1]] 확장 2a.
+[[PAW-UC-001#UC-H5]] 확장 1a · 3a, [[PAW-UC-001#UC-S1]] 확장 1a · 2a.
 
 ```mermaid
 sequenceDiagram
@@ -143,23 +145,25 @@ sequenceDiagram
     API->>CMD: invoke load_animals
     CMD->>SVC: load(on_page)
     SVC->>ST: try_begin_load()
-    alt 이미 받는 중
-        ST-->>SVC: 없음
-        SVC-->>CMD: Busy
-        CMD-->>API: code busy
-        API-->>APP: ApiError busy
-        APP->>APP: 알리지 않고 1초 뒤 다시 부른다
+    alt 이미 받는 중 (화면을 다시 불러와 또 부름)
+        ST-->>SVC: Wait
+        SVC->>ST: wait_for_load()
+        Note over SVC,ST: 새로 받지 않고 그 받기가 끝나기를 기다린다
+        ST-->>SVC: 그 받기의 결과
+        SVC-->>CMD: 같은 결과
+        CMD-->>API: 같은 결과(성공이면 fetchedAt · total, 실패면 같은 code)
     else 받기 시작
-        ST-->>SVC: LoadGuard
+        ST-->>SVC: Mine(LoadGuard)
         SVC->>PS: fetch_page(0, 1000)
         PS->>PAW: GET 첫 쪽
         PAW-->>PS: 1000건
         PS-->>SVC: Page (1000건)
-        SVC->>PS: fetch_page(1000, 1000)
+        SVC->>PS: fetch_page(950, 1000)
         PS->>PAW: GET 둘째 쪽
         PAW--xPS: 15초 동안 응답 없음
         PS-->>SVC: Timeout
         Note over SVC,ST: 받은 1000건은 버린다. replace를 부르지 않는다
+        SVC->>ST: LoadGuard.finish(Timeout)
         SVC-->>CMD: Timeout
         CMD-->>API: code timeout
         API-->>APP: ApiError
@@ -169,10 +173,10 @@ sequenceDiagram
 ```
 
 **읽을 때 볼 것**
-- 실패하면 보관소에 손대지 않는다. 그래서 화면은 `query_animals`를 다시 부를 필요가 없다([[PAW-API-001]] 3장)
+- 실패하면 보관소의 목록에 손대지 않는다. 그래서 화면은 `query_animals`를 다시 부를 필요가 없다([[PAW-API-001]] 3장)
 - 중간 실패도 전체 실패다 — 1000건을 받아 둔 채 목록을 반쯤 바꾸지 않는다([[PAW-UC-001#UC-H1]] 2b)
 - 처음 켤 때의 실패도 같은 흐름이고, 화면만 UI-1의 7로 다르다
-- `busy`는 화면이 차례를 지키면 생기지 않는다(버튼이 이미 막혀 있다). 개발 중 화면만 다시 그려졌을 때처럼 생기면 알리지 않고 1초 뒤 다시 불러 받는 중 화면에 멈추지 않게 한다([[PAW-DOM-002#App]])
+- 받는 중에 또 부르는 일은 화면을 다시 불러왔을 때만 생긴다(버튼은 이미 막혀 있다). 그때 새로 받지 않고 같은 결과를 받으므로 포인핸드에 요청이 두 번 나가지 않는다([[PAW-UC-001#UC-S1]] 1a)
 
 ## SEQ-4 원래 공고 페이지 열기
 
@@ -268,7 +272,9 @@ sequenceDiagram
 - 새로고침 실패 뒤 화면이 `query_animals`를 부르지 않아도 되는 이유(보관소가 그대로다)가 [[PAW-API-001]] 3장 표와 맞는다
 - 상세 보기(UC-H3)는 커맨드를 부르지 않는다 — [[PAW-API-001]] 2.4 「상세를 따로 묻는 커맨드는 없다」와 맞는다
 
-구현하며 고친 것(v2): `fetch_page`가 `Page { raw_count, animals }`를 돌려주고 더 받을지는 원래 건수로 정한다 · `busy`면 화면이 1초 뒤 다시 부른다 · 배포는 `tauri-action` 대신 `scripts/build.ps1` 뒤 `gh release`
+구현하며 고친 것
+- v2: `fetch_page`가 `Page { raw_count, animals }`를 돌려주고 더 받을지는 원래 건수로 정한다 · 배포는 `tauri-action` 대신 `scripts/build.ps1` 뒤 `gh release`
+- v3(코드 리뷰): 받는 중에 또 부르면 `busy` 대신 그 받기의 결과를 함께 받는다(화면을 다시 불러와도 다시 받지 않게) · 다음 쪽은 50건 겹쳐 받는다 · 한 마리도 없으면 `bad-format` · 눈금자는 놓을 때 한 번 조회
 
 ## 3. 미결사항
 
