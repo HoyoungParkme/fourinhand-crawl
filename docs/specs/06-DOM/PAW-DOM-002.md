@@ -2,7 +2,7 @@
 doc_id: PAW-DOM-002
 type: DOM
 title: 포인핸드 대형묘 찾기 — 클래스 명세
-status: draft
+status: approved
 upstream: [PAW-DOM-001, PAW-API-001, PAW-UI-001, PAW-INFRA-001]
 ---
 

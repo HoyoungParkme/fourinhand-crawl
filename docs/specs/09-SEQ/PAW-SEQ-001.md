@@ -2,7 +2,7 @@
 doc_id: PAW-SEQ-001
 type: SEQ
 title: 포인핸드 대형묘 찾기 — 시퀀스
-status: draft
+status: approved
 upstream: [PAW-UC-001, PAW-API-001, PAW-DOM-002, PAW-UI-001, PAW-INFRA-001]
 ---
 

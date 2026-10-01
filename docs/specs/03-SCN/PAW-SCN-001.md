@@ -2,7 +2,7 @@
 doc_id: PAW-SCN-001
 type: SCN
 title: 포인핸드 대형묘 찾기 — 사용자 시나리오
-status: draft
+status: approved
 upstream: [PAW-PRD-001]
 ---
 

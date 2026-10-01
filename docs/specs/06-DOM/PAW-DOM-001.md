@@ -2,7 +2,7 @@
 doc_id: PAW-DOM-001
 type: DOM
 title: 포인핸드 대형묘 찾기 — 도메인 모델
-status: draft
+status: approved
 upstream: [PAW-PRD-001, PAW-UC-001, PAW-INFRA-001]
 ---
 

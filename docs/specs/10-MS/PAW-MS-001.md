@@ -2,7 +2,7 @@
 doc_id: PAW-MS-001
 type: MS
 title: 포인핸드 대형묘 찾기 — 미니스펙
-status: draft
+status: approved
 upstream: [PAW-DOM-002, PAW-API-001, PAW-SEQ-001, PAW-PRD-001]
 ---
 

@@ -2,7 +2,7 @@
 doc_id: PAW-API-001
 type: API
 title: 포인핸드 대형묘 찾기 — 코어 커맨드 명세 (MCP 형식)
-status: draft
+status: approved
 upstream: [PAW-UC-001, PAW-DOM-001, PAW-INFRA-001, PAW-UI-001]
 ---
 

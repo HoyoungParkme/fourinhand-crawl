@@ -2,7 +2,7 @@
 doc_id: PAW-DOM-003
 type: DOM
 title: 포인핸드 대형묘 찾기 — ERD·DD (메모리 데이터)
-status: draft
+status: approved
 upstream: [PAW-DOM-002, PAW-DOM-001, PAW-INFRA-001, PAW-API-001]
 ---
 

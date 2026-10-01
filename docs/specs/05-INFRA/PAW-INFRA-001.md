@@ -2,7 +2,7 @@
 doc_id: PAW-INFRA-001
 type: INFRA
 title: 포인핸드 대형묘 찾기 — 인프라 아키텍처
-status: draft
+status: approved
 upstream: [PAW-PRD-001, PAW-UC-001]
 ---
 

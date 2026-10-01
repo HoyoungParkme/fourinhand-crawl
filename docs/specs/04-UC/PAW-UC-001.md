@@ -2,7 +2,7 @@
 doc_id: PAW-UC-001
 type: UC
 title: 포인핸드 대형묘 찾기 — 유스케이스
-status: draft
+status: approved
 upstream: [PAW-PRD-001, PAW-SCN-001]
 ---
 

@@ -2,7 +2,7 @@
 doc_id: PAW-PRD-001
 type: PRD
 title: 포인핸드 대형묘 찾기 — 제품 요구
-status: draft
+status: approved
 upstream: [PAW-RFQ-001]
 ---
 

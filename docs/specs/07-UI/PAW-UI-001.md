@@ -2,7 +2,7 @@
 doc_id: PAW-UI-001
 type: UI
 title: 포인핸드 대형묘 찾기 — 화면 설계·와이어프레임
-status: draft
+status: approved
 upstream: [PAW-UC-001, PAW-PRD-001, PAW-DOM-001, PAW-INFRA-001]
 ---
 

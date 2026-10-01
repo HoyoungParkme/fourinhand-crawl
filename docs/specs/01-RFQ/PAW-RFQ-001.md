@@ -2,7 +2,7 @@
 doc_id: PAW-RFQ-001
 type: RFQ
 title: 포인핸드 대형묘 찾기 — 요구·인터뷰
-status: draft
+status: approved
 upstream: []
 ---
 

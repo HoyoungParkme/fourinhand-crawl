@@ -2,7 +2,7 @@
 doc_id: PAW-CODE-001
 type: CODE
 title: 포인핸드 대형묘 찾기 — 구현 계획
-status: draft
+status: approved
 upstream: [PAW-MS-001, PAW-DOM-002, PAW-API-001, PAW-UI-001, PAW-SEQ-001, PAW-SCN-001, PAW-INFRA-001]
 ---
 
